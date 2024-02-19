@@ -1,0 +1,449 @@
+StarFive # printenv
+baudrate=115200
+
+boot_a_script=
+    load ${devtype} ${devnum}:${distro_bootpart} ${scriptaddr} ${prefix}${script}
+    source ${scriptaddr}
+
+boot_devs=mmc nvme
+
+boot_efi_binary=
+    load ${devtype} ${devnum}:${distro_bootpart} ${kernel_addr_r} \
+            efi/boot/bootriscv64.efi;
+    if fdt addr ${fdt_addr_r}; then
+        bootefi ${kernel_addr_r} ${fdt_addr_r};
+    else
+	bootefi ${kernel_addr_r} ${fdtcontroladdr};
+    fi
+
+boot_efi_bootmgr=
+    if fdt addr ${fdt_addr_r}; then
+        bootefi bootmgr ${fdt_addr_r};
+    else
+        bootefi bootmgr;
+    fi
+
+boot_extlinux=
+    sysboot ${devtype} ${devnum}:${distro_bootpart} any ${scriptaddr} \
+            ${prefix}${boot_syslinux_conf}
+
+boot_net_usb_start=usb start
+boot_pci_enum=pci enum
+boot_prefixes=/ /boot/
+
+boot_script_dhcp=boot.scr.uimg
+
+boot_scripts=boot.scr.uimg boot.scr
+
+boot_syslinux_conf=extlinux/extlinux.conf
+boot_targets=mmc0 dhcp
+
+bootargs=console=tty1 console=ttyS0,115200  debug rootwait  earlycon=sbi
+
+bootcmd=
+    run sdk_boot_env;
+    run distro_boot_env
+
+bootcmd_dhcp=
+    devtype=dhcp;
+    run boot_net_usb_start;
+    run boot_pci_enum;
+    if dhcp ${scriptaddr} ${boot_script_dhcp}; then
+        source ${scriptaddr};
+    fi;
+    setenv efi_fdtfile ${fdtfile};
+    setenv efi_old_vci ${bootp_vci};
+    setenv efi_old_arch ${bootp_arch};
+    setenv bootp_vci PXEClient:Arch:00027:UNDI:003000;
+    setenv bootp_arch 0x1b;
+    if dhcp ${kernel_addr_r}; then
+        tftpboot ${fdt_addr_r} dtb/${efi_fdtfile};
+        if fdt addr ${fdt_addr_r}; then
+            bootefi ${kernel_addr_r} ${fdt_addr_r};
+        else
+            bootefi ${kernel_addr_r} ${fdtcontroladdr};
+        fi;
+    fi;
+    setenv bootp_vci ${efi_old_vci};
+    setenv bootp_arch ${efi_old_arch};setenv efi_fdtfile;
+    setenv efi_old_arch;
+    setenv efi_old_vci;
+
+bootcmd_distro=
+    run load_distro_uenv;
+    run fdt_loaddtb;
+    run fdt_sizecheck;
+    run set_fdt_distro;
+    sysboot ${bootdev} ${devnum}:${bootpart} fat ${scriptaddr} \
+            /${boot_syslinux_conf};
+
+bootcmd_mmc0=devnum=0; run mmc_boot
+
+bootdelay=2
+bootdir=/boot
+bootenv=uEnv.txt
+
+bootenv_mmc=
+    setenv bootdev mmc;
+    if test ${bootmode} = flash; then
+        for mmc_devnum in ${mmc_devnum_l}; do
+	    setenv devnum ${mmc_devnum};
+	    run mmc_test_and_boot;
+	done;
+    fi;
+    if test ${bootmode} = sd; then
+        setenv devnum ${sd_devnum};
+	run mmc_test_and_boot;
+    fi;
+    if test ${bootmode} = emmc; then
+        setenv devnum  ${emmc_devnum};
+	run mmc_test_and_boot;
+    fi;
+
+bootenv_nvme=
+    if test ${bootmode} = flash; then
+        for nvme_devnum in ${nvme_devnum_l}; do
+	    setenv devnum ${nvme_devnum};
+	    if pci enum; then
+	        nvme scan;
+	    fi;
+            if nvme dev ${devnum}; then
+	        echo Try booting from NVME${devnum} ...;
+	        setenv bootdev nvme;
+	        setenv sdev_blk nvme${devnum}n1p${rootpart};
+	        run load_sdk_uenv;
+	        run boot2;
+	    fi;
+        done;
+    fi;
+
+bootenv_sdk=vf2_uEnv.txt
+bootmode=flash
+bootpart=3
+
+chip_vision=B
+
+chipa_gmac_set=
+    fdt set /soc/ethernet@16030000/ethernet-phy@0 tx_inverted_10 <0x0>;
+    fdt set /soc/ethernet@16030000/ethernet-phy@0 tx_inverted_100 <0x0>;
+    fdt set /soc/ethernet@16030000/ethernet-phy@0 tx_inverted_1000 <0x0>;
+    fdt set /soc/ethernet@16030000/ethernet-phy@0 tx_delay_sel <0x9>;
+    fdt set /soc/ethernet@16040000/ethernet-phy@1 tx_inverted_10 <0x0>;
+    fdt set /soc/ethernet@16040000/ethernet-phy@1 tx_inverted_100 <0x0>;
+    fdt set /soc/ethernet@16040000/ethernet-phy@1 tx_inverted_1000 <0x0>;
+    fdt set /soc/ethernet@16040000/ethernet-phy@1 tx_delay_sel <0x9>
+chipa_set=
+    if test ${chip_vision} = A; then
+        run chipa_gmac_set;
+    fi;
+chipa_set_linux=
+    fdt addr ${fdt_addr_r};
+    run visionfive2_mem_set;
+    run chipa_set;
+chipa_set_uboot=
+    fdt addr ${uboot_fdt_addr};
+    run chipa_set;
+
+cma_1g=b000000
+cma_2g=20000000
+cma_4g=40000000
+cma_8g=60000000
+
+cma_ddr1g_set=
+    fdt set ${cma_node} size <0x0 0x${cma_1g}>;
+    fdt set ${cma_node} alloc-ranges <0x0 0x${cma_start} 0x0 0x${cma_1g}>;
+cma_ddr2g_set=
+    fdt set ${cma_node} size <0x0 0x${cma_2g}>;
+    fdt set ${cma_node} alloc-ranges <0x0 0x${cma_start} 0x0 0x${cma_2g}>;
+cma_ddr4g_set=
+    fdt set ${cma_node} size <0x0 0x${cma_4g}>;
+    fdt set ${cma_node} alloc-ranges <0x0 0x${cma_start} 0x0 0x${cma_4g}>;
+cma_ddr8g_set=
+    fdt set ${cma_node} size <0x0 0x${cma_8g}>;
+    fdt set ${cma_node} alloc-ranges <0x0 0x${cma_start} 0x0 0x${cma_8g}>;
+
+cma_node=/reserved-memory/linux,cma
+
+cma_resize=
+    if test ${memory_size} -eq 40000000; then
+        run cma_ddr1g_set;
+    elif test ${memory_size} -eq 80000000; then
+        run cma_ddr2g_set;
+    elif test ${memory_size} -eq 100000000; then
+        run cma_ddr4g_set;
+    elif test ${memory_size} -ge 200000000; then
+        run cma_ddr8g_set;
+    fi;
+
+cma_start=70000000
+cpu_max_vol=1040000
+
+cpu_speed_1250_set=
+    fdt rm /opp-table-0/opp-375000000;
+    fdt rm /opp-table-0/opp-500000000;
+    fdt rm /opp-table-0/opp-750000000;
+    fdt rm /opp-table-0/opp-1500000000;
+
+cpu_speed_1500_set=
+    fdt rm /opp-table-0/opp-312500000;
+    fdt rm /opp-table-0/opp-417000000;
+    fdt rm /opp-table-0/opp-625000000;
+    fdt rm /opp-table-0/opp-1250000000;
+
+cpu_vol_1020_set=fdt set /opp-table-0/opp-1500000000 opp-microvolt <1020000>;
+cpu_vol_1040_set=fdt set /opp-table-0/opp-1500000000 opp-microvolt <1040000>;
+cpu_vol_1060_set=fdt set /opp-table-0/opp-1500000000 opp-microvolt <1060000>;
+
+cpu_vol_set=
+    if test ${cpu_max_vol} = 1000000; then
+        run cpu_speed_1250_set;
+    else
+        run cpu_speed_1500_set;
+	if test ${cpu_max_vol} = 1060000; then
+	    run cpu_vol_1060_set;
+	elif test ${cpu_max_vol} = 1020000; then
+	    run cpu_vol_1020_set;
+	else
+	    run cpu_vol_1040_set;
+	fi;
+    fi;
+
+devnum=1
+
+distro_boot_env=
+    echo Tring booting distro ...;
+    for bootdev_s in ${boot_devs}; do
+        run distro_bootenv_${bootdev_s};
+    done;
+
+distro_bootcmd=
+    setenv nvme_need_init;
+    for target in ${boot_targets}; do
+        run boot cmd_${target};
+    done
+distro_bootenv_mmc=
+    setenv bootdev mmc;
+    if test ${bootmode} = flash; then
+        for mmc_devnum in ${mmc_devnum_l}; do
+            setenv devnum ${mmc_devnum};
+            run distro_mmc_test_and_boot;
+        done;
+    fi;
+    if test ${bootmode} = sd; then
+        setenv devnum ${sd_devnum};
+	run distro_mmc_test_and_boot;
+    fi;
+    if test ${bootmode} = emmc; then
+        setenv devnum ${emmc_devnum};
+	run distro_mmc_test_and_boot;
+    fi;
+
+distro_bootenv_nvme=
+    if test ${bootmode} = flash; then
+        for nvme_devnum in ${nvme_devnum_l}; do
+	    setenv devnum ${nvme_devnum};
+	    if pci enum; then
+	        nvme scan;
+	    fi;
+	    if nvme dev ${devnum}; then
+	        echo Try booting from NVME${devnum} ...;
+	        setenv bootdev nvme;
+	        run bootcmd_distro;
+	    fi;
+	done;
+    fi;
+
+distro_mmc_test_and_boot=
+    if mmc dev ${devnum}; then
+        echo Try booting from MMC${devnum} ...;
+	run bootcmd_distro;
+    fi;
+
+efi_dtb_prefixes=/ /dtb/ /dtb/current/
+
+emmc_devnum=0
+
+eth0addr=6c:cf:39:00:6f:3e
+eth1addr=6c:cf:39:00:6f:3f
+ethact=ethernet@16030000
+ethaddr=6c:cf:39:00:6f:3e
+
+fdt_addr_r=0x46000000
+fdt_high=0xffffffffffffffff
+
+fdt_loaddtb=
+    fatload ${bootdev} ${devnum}:${bootpart} ${fdt_addr_r} /dtbs/${fdtfile};
+    fdt addr ${fdt_addr_r};
+    fdt_sizecheck=fatsize ${bootdev} ${devnum}:${bootpart} /dtbs/${fdtfile};
+
+fdtaddr=f7fad8f0
+fdtcontroladdr=f7fad8f0
+fdtfile=starfive/jh7110-visionfive-v2.dtb
+fdtoverlay_addr_r=0x4f000000
+
+initrd_high=0xffffffffffffffff
+ipaddr=192.168.2.199
+
+kernel_addr_r=0x40200000
+kernel_comp_addr_r=0x5a000000
+kernel_comp_size=0x4000000
+
+load_distro_uenv=
+    fatload ${bootdev} ${devnum}:${bootpart} ${loadaddr} /${bootenv};
+    env import ${loadaddr} ${filesize};
+load_efi_dtb=
+    load ${devtype} ${devnum}:${distro_bootpart} ${fdt_addr_r} \
+            ${prefix}${efi_fdtfile}
+load_sdk_uenv=
+    fatload ${bootdev} ${devnum}:${bootpart} ${loadaddr} ${bootenv_sdk};
+    env import -t ${loadaddr} ${filesize};
+
+loadaddr=0x60000000
+memory_addr=40000000
+memory_size=100000000
+
+mmc_boot=
+    if mmc dev ${devnum}; then
+        devtype=mmc;
+	run scan_dev_for_boot_part;
+    fi
+
+mmc_devnum_l=1 0
+
+mmc_test_and_boot=
+    if mmc dev ${devnum}; then
+        echo Try booting from MMC${devnum} ...;
+	setenv sdev_blk mmcblk${devnum}p${rootpart};
+	run load_sdk_uenv; run boot2;
+    fi;
+
+netmask=255.255.255.0
+
+nvme_boot=
+    run boot_pci_enum;
+    run nvme_init;
+    if nvme dev ${devnum}; then
+        devtype=nvme;
+        run scan_dev_for_boot_part;
+    fi
+
+nvme_devnum_l=0 0
+
+nvme_init=
+    if ${nvme_need_init}; then
+        setenv nvme_need_init false;
+	nvme scan;
+    fi
+
+partitions=
+    name=loader1,start=17K,size=1M,type=${type_guid_gpt_loader1};
+    name=loader2,size=4MB,type=${type_guid_gpt_loader2};
+    name=system,size=-,bootable,type=${type_guid_gpt_system};
+
+preboot=run chipa_set_uboot;
+pxefile_addr_r=0x45900000
+ramdisk_addr_r=0x46100000
+rootpart=4
+
+scan_dev_for_boot=
+    echo Scanning ${devtype} ${devnum}:${distro_bootpart}...;
+    for prefix in ${boot_prefixes}; do
+        run scan_dev_for_extlinux;
+	run scan_dev_for_scripts;
+    done;
+    run scan_dev_for_efi;
+
+scan_dev_for_boot_part=
+    part list ${devtype} ${devnum} -bootable devplist;
+    env exists devplist || setenv devplist 1;
+    for distro_bootpart in ${devplist}; do
+        if fstype ${devtype} ${devnum}:${distro_bootpart} bootfstype; then
+	    run scan_dev_for_boot;
+	fi;
+    done;
+    setenv devplist
+
+scan_dev_for_efi=
+    setenv efi_fdtfile ${fdtfile};
+    for prefix in ${efi_dtb_prefixes}; do
+        if test -e ${devtype} ${devnum}:${distro_bootpart} \
+	        ${prefix}${efi_fdtfile}; then
+	    run load_efi_dtb;
+	fi;
+    done;
+    run boot_efi_bootmgr;
+    if test -e ${devtype} ${devnum}:${distro_bootpart} \
+            efi/boot/bootriscv64.efi; then
+	echo Found EFI removable media binary efi/boot/bootriscv64.efi;
+	run boot_efi_binary;
+	echo EFI LOAD FAILED: continuing...;
+    fi;
+    setenv efi_fdtfile
+
+scan_dev_for_extlinux=
+    if test -e ${devtype} ${devnum}:${distro_bootpart} \
+            ${prefix}${boot_syslinux_conf}; then
+	echo Found ${prefix}${boot_syslinux_conf};
+	run boot_extlinux; echo SCRIPT FAILED: continuing...;
+    fi
+
+scan_dev_for_scripts=
+    for script in ${boot_scripts}; do
+        if test -e ${devtype} ${devnum}:${distro_bootpart} \
+	        ${prefix}${script}; then
+	    echo Found U-Boot script ${prefix}${script};
+	    run boot_a_script;
+	    echo SCRIPT FAILED: continuing...;
+	fi;
+    done
+
+scan_sf_for_scripts=
+    ${devtype} read ${scriptaddr} ${script_offset_f} ${script_size_f};
+    source ${scriptaddr};
+    echo SCRIPT FAILED: continuing...
+
+script_offset_f=0x1fff000
+script_size_f=0x1000
+scriptaddr=0x43900000
+sd_devnum=1
+
+sdk_boot_env=
+    for bootdev_s in ${boot_devs}; do
+        run bootenv_${bootdev_s};
+    done;
+
+serial#=VF7110B1-2253-D004E000-40001119
+serverip=192.168.2.25
+
+set_fdt_distro=
+    run chipa_set_linux;
+    run cpu_vol_set;
+    fatwrite ${bootdev} ${devnum}:${bootpart} ${fdt_addr_r} \
+            /dtbs/${fdtfile} ${filesize};
+
+sf_boot=
+    if sf probe ${busnum}; then
+         devtype=sf;
+	 run scan_sf_for_scripts;
+    fi
+
+type_guid_gpt_loader1=5B193300-FC78-40CD-8002-E86C45580B47
+type_guid_gpt_loader2=2E54B353-1271-4842-806F-E436D6AF6985
+type_guid_gpt_system=0FC63DAF-8483-4772-8E79-3D69D8477DE4
+
+uboot_fdt_addr=0xf7fad8f0
+usb_boot=
+    usb start;
+    if usb dev ${devnum}; then
+        devtype=usb;
+	run scan_dev_for_boot_part;
+    fi
+
+ver=U-Boot 2021.10 (Sep 08 2023 - 12:14:42 -0700)
+
+visionfive2_mem_set=
+    fdt memory ${memory_addr} ${memory_size};
+    run cma_resize;
+
+Environment size: 10171/65532 bytes
+StarFive #
